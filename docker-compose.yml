@@ -1,0 +1,26 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: omnichannel-postgres
+    environment:
+      POSTGRES_USER: omnichannel
+      POSTGRES_PASSWORD: omnichannel_dev_password
+      POSTGRES_DB: omnichannel_chat
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./docs/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+
+  redis:
+    image: redis:7-alpine
+    container_name: omnichannel-redis
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+
+volumes:
+  pg_data:
+  redis_data:

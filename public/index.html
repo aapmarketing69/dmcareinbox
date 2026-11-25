@@ -1,0 +1,714 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DmCare Inbox — รวมแชท LINE (a1–a5) &amp; Facebook (b1–b5)</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <!-- Full-Screen Login Overlay -->
+  <section id="loginScreen" class="login-screen" aria-label="เข้าสู่ระบบ">
+    <div class="login-card">
+      <div class="login-brand">
+        <span class="brand-logo login-logo" aria-hidden="true">DC</span>
+        <div>
+          <h1>DmCare Inbox</h1>
+          <p>ระบบรวมแชท LINE (a1–a5) &amp; Facebook (b1–b5)</p>
+        </div>
+      </div>
+
+      <form id="loginForm" class="login-form">
+        <label class="field-group">
+          <span>อีเมลแอดมิน</span>
+          <input id="loginEmail" type="email" class="text-input" placeholder="owner@dmcare.app" autocomplete="username" required />
+        </label>
+        <label class="field-group">
+          <span>รหัสผ่าน</span>
+          <input id="loginPassword" type="password" class="text-input" placeholder="••••••••" autocomplete="current-password" required />
+        </label>
+        <div id="loginErrorBox" class="login-error hidden" role="alert"></div>
+        <button type="submit" id="loginSubmitBtn" class="btn btn-primary full-width">เข้าสู่ระบบ</button>
+      </form>
+
+      <div id="loginDemoBox" class="login-demo-box">
+        <div class="login-demo-title">บัญชีเริ่มต้นสำหรับทดสอบ (คลิกเพื่อกรอกอัตโนมัติ):</div>
+        <div class="login-demo-grid">
+          <button type="button" class="demo-cred-btn" data-demo-email="may@shop.local" data-demo-pass="admin1234">
+            <strong>แอดมินเมย์ (Supervisor)</strong>
+            <span>เห็นทุกร้าน + จัดการทีม · may@shop.local</span>
+          </button>
+          <button type="button" class="demo-cred-btn" data-demo-email="ton@shop.local" data-demo-pass="agent1234">
+            <strong>แอดมินต้น (Agent)</strong>
+            <span>สิทธิ์เฉพาะ a1–a3, b1–b3 · ton@shop.local</span>
+          </button>
+          <button type="button" class="demo-cred-btn" data-demo-email="fah@shop.local" data-demo-pass="agent1234">
+            <strong>แอดมินฟ้า (Agent)</strong>
+            <span>สิทธิ์เฉพาะ a4–a5, b4–b5 · fah@shop.local</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div id="appShell" class="app-shell hidden">
+    <!-- Column 1: Channels Sidebar -->
+    <aside class="sidebar" aria-label="รายชื่อร้านค้าและช่องทาง">
+      <div class="sidebar-header">
+        <div class="brand-row">
+          <div class="brand">
+            <span class="brand-logo" aria-hidden="true">DC</span>
+            <div>
+              <h1>DmCare</h1>
+              <span id="sseStatus" class="sse-pill offline">กำลังเชื่อมต่อ...</span>
+            </div>
+          </div>
+          <button
+            type="button"
+            id="soundToggleBtn"
+            class="sound-btn on"
+            title="เปิด/ปิดเสียงแจ้งเตือนเมื่อมีข้อความใหม่"
+            aria-pressed="true"
+          >🔔</button>
+        </div>
+      </div>
+
+      <div class="sidebar-actions">
+        <button type="button" id="openSimulatorBtn" class="btn btn-primary full-width">
+          + จำลองลูกค้าทัก (Simulator)
+        </button>
+        <button type="button" id="openCampaignsBtn" class="btn btn-voucher full-width">
+          🎁 กิจกรรม &amp; โค้ด (.xls)
+        </button>
+        <div class="inline-form">
+          <button type="button" id="openManageChannelsBtn" class="btn btn-secondary compact" style="flex:1;">
+            ⚙ ตั้งค่าร้าน
+          </button>
+          <button type="button" id="openAddChannelBtn" class="btn btn-secondary compact" style="flex:1;">
+            + เพิ่มร้าน
+          </button>
+        </div>
+      </div>
+
+      <nav class="channel-nav">
+        <div class="nav-section">
+          <button type="button" class="nav-item active" data-filter-platform="all" data-filter-channel="all">
+            <span>แชทรวมทุกร้าน</span>
+            <span id="totalUnreadBadge" class="badge hidden">0</span>
+          </button>
+          <button type="button" class="nav-item" data-filter-platform="line" data-filter-channel="all">
+            <span><span class="dot line"></span>LINE ทั้งหมด</span>
+            <span id="lineUnreadBadge" class="badge line hidden">0</span>
+          </button>
+          <button type="button" class="nav-item" data-filter-platform="facebook" data-filter-channel="all">
+            <span><span class="dot facebook"></span>Facebook ทั้งหมด</span>
+            <span id="fbUnreadBadge" class="badge facebook hidden">0</span>
+          </button>
+        </div>
+
+        <div class="nav-group-title">LINE OA (a1–a5)</div>
+        <div id="lineChannelList" class="nav-section"></div>
+
+        <div class="nav-group-title">Facebook Pages (b1–b5)</div>
+        <div id="fbChannelList" class="nav-section"></div>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="user-card">
+          <div id="userAvatarBadge" class="user-mini-avatar">?</div>
+          <div class="user-meta">
+            <strong id="userDisplayName">-</strong>
+            <span id="userRoleLabel">-</span>
+          </div>
+        </div>
+        <div class="user-actions">
+          <button type="button" id="openAgentsBtn" class="btn btn-secondary compact hidden" title="จัดการบัญชีแอดมินและสิทธิ์แยกร้านค้า">
+            👥 ทีม &amp; สิทธิ์
+          </button>
+          <button type="button" id="openChangePwBtn" class="btn btn-secondary compact" title="เปลี่ยนรหัสผ่านของฉัน">
+            🔑 รหัส
+          </button>
+          <button type="button" id="logoutBtn" class="btn btn-danger compact" title="ออกจากระบบ">
+            ออก
+          </button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Column 2: Conversation List -->
+    <section class="conv-column" aria-label="รายการแชท">
+      <div class="conv-header">
+        <input
+          id="searchInput"
+          type="search"
+          class="text-input"
+          placeholder="ค้นหาชื่อลูกค้า, ข้อความ, รหัสร้าน..."
+          aria-label="ค้นหาแชท"
+        />
+        <div class="status-tabs" role="tablist">
+          <button type="button" class="tab-btn active" data-box="unreplied">
+            รอตอบ <span id="tabCountUnreplied" class="tab-count">0</span>
+          </button>
+          <button type="button" id="pendingFolderTab" class="tab-btn" data-box="pending">
+            🚩 ต้องดำเนินการ <span id="tabCountPending" class="tab-count">0</span>
+          </button>
+          <button type="button" class="tab-btn" data-box="replied">
+            ตอบแล้ว <span id="tabCountReplied" class="tab-count">0</span>
+          </button>
+          <button type="button" class="tab-btn" data-box="resolved">
+            ปิดงาน <span id="tabCountResolved" class="tab-count">0</span>
+          </button>
+          <button type="button" class="tab-btn" data-box="all">
+            ทั้งหมด <span id="tabCountAll" class="tab-count">0</span>
+          </button>
+        </div>
+        <div id="unreadAlertBar" class="notify-bar hidden" aria-label="ปุ่มแจ้งเตือนข้อความใหม่">
+          <button type="button" id="lineNotifyBtn" class="notify-pill line hidden">
+            <span class="notify-dot line" aria-hidden="true"></span>
+            <span>LINE ใหม่</span>
+            <strong id="lineNotifyCount">0</strong>
+          </button>
+          <button type="button" id="fbNotifyBtn" class="notify-pill facebook hidden">
+            <span class="notify-dot facebook" aria-hidden="true"></span>
+            <span>FB ใหม่</span>
+            <strong id="fbNotifyCount">0</strong>
+          </button>
+        </div>
+      </div>
+      <div id="conversationList" class="conv-list"></div>
+    </section>
+
+    <!-- Column 3: Active Chat Thread -->
+    <main class="chat-column" aria-label="หน้าต่างแชท">
+      <div id="chatEmptyState" class="empty-state">
+        <div class="empty-card">
+          <h2>เลือกห้องแชทเพื่อเริ่มตอบลูกค้า</h2>
+          <p>DmCare Inbox — รองรับการรับ-ส่งข้อความแบบ Real-time แยกร้านค้า LINE (a1–a5) และ Facebook (b1–b5)</p>
+          <p id="chatEmptyHint" class="hint">ลองกดปุ่ม <strong>+ จำลองลูกค้าทัก (Simulator)</strong> ด้านซ้ายเพื่อทดสอบ Webhook</p>
+        </div>
+      </div>
+
+      <div id="chatWorkspace" class="chat-workspace hidden">
+        <header class="chat-header">
+          <div class="chat-peer">
+            <div id="chatCustomerAvatar" class="avatar"></div>
+            <div>
+              <div class="chat-peer-title">
+                <h2 id="chatCustomerName">-</h2>
+                <span id="chatChannelPill" class="channel-pill"></span>
+              </div>
+              <div id="chatPolicyBanner" class="policy-text"></div>
+            </div>
+          </div>
+
+          <div class="chat-controls">
+            <button type="button" id="escalateBtn" class="btn btn-escalate compact" title="ย้ายแชทนี้ไปโฟลเดอร์ 'ต้องดำเนินการ' เพื่อให้ทีม/หัวหน้าช่วยดูแลต่อ">
+              🚩 ต้องดำเนินการ
+            </button>
+            <select id="assignAgentSelect" class="select-input compact" aria-label="มอบหมายแอดมิน"></select>
+            <select id="convStatusSelect" class="select-input compact" aria-label="สถานะห้องแชท">
+              <option value="open">สถานะ: เปิดอยู่</option>
+              <option value="pending">สถานะ: ต้องดำเนินการ</option>
+              <option value="resolved">สถานะ: ปิดงานแล้ว</option>
+            </select>
+            <button type="button" id="closeChatBtn" class="btn btn-secondary compact" title="กด Esc เพื่อปิดหน้าต่างแชทนี้">
+              × ปิด (Esc)
+            </button>
+          </div>
+        </header>
+
+        <div id="collisionBanner" class="collision-banner hidden" role="alert"></div>
+
+        <div class="message-stage">
+          <div id="messageList" class="message-list"></div>
+          <button type="button" id="jumpNewMsgBtn" class="jump-new-btn hidden">
+            <span id="jumpNewMsgDot" class="notify-dot" aria-hidden="true"></span>
+            <span id="jumpNewMsgText">มีข้อความใหม่</span>
+          </button>
+          <div id="dropOverlay" class="drop-overlay hidden">
+            <div class="drop-overlay-card">ปล่อยรูปภาพเพื่อแนบส่งเข้าห้องแชท</div>
+          </div>
+        </div>
+
+        <div class="quick-reply-strip">
+          <div id="qrPreviewPopover" class="qr-preview-popover hidden" aria-live="polite">
+            <div class="qr-preview-header">
+              <div id="qrPreviewTitle" class="qr-preview-title"></div>
+              <span class="qr-preview-hint">คลิกเพื่อแทรกเข้าช่องแชท</span>
+            </div>
+            <div class="qr-preview-stack">
+              <img id="qrPreviewImg" class="qr-preview-img hidden" alt="รูปภาพตัวอย่างข้อความด่วน" />
+              <div id="qrPreviewText" class="qr-preview-bubble"></div>
+            </div>
+          </div>
+          <div id="quickReplyBar" class="quick-reply-bar"></div>
+          <div class="qr-strip-actions">
+            <button type="button" id="openManageQuickReplyBtn" class="qr-manage-btn" title="แก้ไขหรือลบข้อความตอบด่วน">
+              ⚙ จัดการ
+            </button>
+            <button type="button" id="openAddQuickReplyBtn" class="qr-add-btn" title="เพิ่มข้อความตอบด่วนเฉพาะร้านหรือใช้ทุกร้าน">
+              + ตอบด่วน
+            </button>
+          </div>
+        </div>
+
+        <div class="composer-wrap">
+          <div id="slashMenu" class="slash-menu hidden" role="listbox" aria-label="เลือกข้อความตอบด่วน"></div>
+
+          <div id="pendingImagePreview" class="pending-image-bar hidden">
+            <img id="pendingImageThumb" alt="ตัวอย่างรูปที่จะส่ง" />
+            <div class="pending-image-meta">
+              <strong id="pendingImageName">รูปภาพพร้อมส่ง</strong>
+              <span>พิมพ์คำบรรยายเพิ่มหรือกดส่งได้เลย</span>
+            </div>
+            <button type="button" id="cancelPendingImageBtn" class="btn btn-secondary compact">× ยกเลิก</button>
+          </div>
+
+          <form id="replyForm" class="reply-form">
+            <input id="imageFileInput" type="file" accept="image/png,image/jpeg,image/webp,image/gif" class="hidden" />
+            <button type="button" id="attachImageBtn" class="btn btn-secondary attach-btn" title="แนบรูปภาพ หรือวางรูปด้วย Ctrl+V / ลากวางได้เลย">
+              📎 รูป
+            </button>
+            <textarea
+              id="replyInput"
+              rows="2"
+              placeholder="พิมพ์ข้อความตอบลูกค้า, พิมพ์ / เพื่อเลือกตอบด่วน, หรือวางรูปด้วย Ctrl+V"
+            ></textarea>
+            <button type="submit" id="sendReplyBtn" class="btn btn-primary">ส่งข้อความ</button>
+          </form>
+        </div>
+      </div>
+    </main>
+
+    <!-- Column 4: Customer & Webhook Details -->
+    <aside id="infoPanel" class="info-panel hidden" aria-label="ข้อมูลลูกค้าและช่องทาง">
+      <div class="info-section voucher-panel">
+        <div class="voucher-panel-head">
+          <h3>🎁 ตรวจหลักฐานกิจกรรม (AI)</h3>
+          <span id="aiProviderBadge" class="ai-mode-pill">AI</span>
+        </div>
+
+        <select id="verifyCampaignSelect" class="select-input compact full-width" aria-label="เลือกกิจกรรม"></select>
+
+        <div class="evidence-picker-block">
+          <div class="evidence-picker-label">
+            <span>รูปหลักฐานที่ลูกค้าส่งมา (ติ๊กเลือกรวมกันได้):</span>
+            <span id="evidenceSelectedCount" class="mono">0 รูป</span>
+          </div>
+          <div id="evidenceThumbGrid" class="evidence-thumb-grid"></div>
+        </div>
+
+        <select id="mockAiScenarioSelect" class="select-input compact full-width hidden" aria-label="โหมดทดสอบ AI">
+          <option value="auto">โหมดจำลอง AI: อัตโนมัติ (2+ รูปผ่าน 95%)</option>
+          <option value="low_confidence">โหมดจำลอง AI: ไม่ถึง 90% (74%)</option>
+          <option value="fraud_tampered">โหมดจำลอง AI: พบ Fraud / ตัดต่อ</option>
+        </select>
+
+        <button type="button" id="runAiVerifyBtn" class="btn btn-primary full-width" style="margin-top:6px;">
+          🔍 ให้ AI ตรวจหลักฐาน (เกณฑ์ ≥ 90%)
+        </button>
+        <button type="button" id="runManualFallbackBtn" class="btn btn-secondary full-width compact hidden" style="margin-top:6px;" title="สำหรับ Supervisor เมื่อ AI ขัดข้องชั่วคราว (ยังตรวจกันโกงรูปซ้ำ SHA-256 อัตโนมัติ)">
+          🛡 ตรวจเองโดย Supervisor (ไม่ใช้ AI)
+        </button>
+
+        <div id="aiVerdictContainer" class="ai-verdict-container hidden"></div>
+      </div>
+
+      <div class="info-section">
+        <h3>ข้อมูลลูกค้า</h3>
+        <dl class="meta-list">
+          <dt>ชื่อที่แสดง</dt>
+          <dd id="infoCustomerName">-</dd>
+          <dt>Platform User ID</dt>
+          <dd id="infoExternalUserId" class="mono">-</dd>
+          <dt>ร้านค้า / ช่องทาง</dt>
+          <dd id="infoChannelName">-</dd>
+          <dt>Webhook Path</dt>
+          <dd id="infoWebhookUrl" class="mono">-</dd>
+        </dl>
+      </div>
+
+      <div class="info-section">
+        <h3>แท็ก (Tags)</h3>
+        <div id="infoTagsContainer" class="tags-wrap"></div>
+        <form id="addTagForm" class="inline-form">
+          <input id="newTagInput" type="text" class="text-input compact" placeholder="เพิ่มแท็ก เช่น รอโอน" />
+          <button type="submit" class="btn btn-secondary compact">เพิ่ม</button>
+        </form>
+      </div>
+
+      <div class="info-section">
+        <h3>บันทึกช่วยจำ (Notes)</h3>
+        <textarea id="customerNotesInput" rows="4" class="text-input" placeholder="บันทึกข้อมูลลูกค้าหรือเลขพัสดุ..."></textarea>
+        <button type="button" id="saveNotesBtn" class="btn btn-secondary full-width" style="margin-top:8px;">
+          บันทึกโน้ต
+        </button>
+      </div>
+    </aside>
+  </div>
+
+  <!-- Modal 1: Webhook Simulator -->
+  <dialog id="simulatorDialog" class="modal">
+    <form id="simulatorForm" method="dialog" class="modal-body">
+      <div class="modal-header">
+        <h3>จำลองลูกค้าทักผ่าน Webhook (Signed Payload)</h3>
+        <button type="button" class="icon-btn" data-close-dialog="simulatorDialog" aria-label="ปิด">&times;</button>
+      </div>
+      <p class="modal-desc">
+        ระบบจะสร้าง JSON Payload ตามรูปแบบจริงของ LINE / Facebook พร้อมคำนวณ HMAC Signature และยิงเข้า Webhook Pipeline
+      </p>
+      <label class="field-group">
+        <span>เลือกร้านค้าปลายทาง</span>
+        <select id="simChannelSelect" class="select-input" required></select>
+      </label>
+      <label class="field-group">
+        <span>ชื่อลูกค้า</span>
+        <input id="simCustomerName" type="text" class="text-input" value="คุณวิภา ทดสอบระบบ" required />
+      </label>
+      <label class="field-group">
+        <span>รหัสลูกค้า (LINE userId / FB PSID — ใช้ค่าเดิมเพื่อต่อแชทเดิม)</span>
+        <input id="simExternalUserId" type="text" class="text-input mono" placeholder="ปล่อยว่างเพื่อสุ่มลูกค้าใหม่" />
+      </label>
+      <label class="field-group">
+        <span>ข้อความที่ลูกค้าส่งเข้ามา</span>
+        <textarea id="simMessageText" rows="2" class="text-input">ส่งหลักฐานกิจกรรมกดไลก์ + แชร์สาธารณะครบแล้วครับ ขอรับ Gift Voucher ครับ</textarea>
+      </label>
+      <div class="field-group">
+        <span>แนบรูปหลักฐานจำลอง (ส่งรวมกันหลายรูปได้)</span>
+        <div class="sim-media-controls">
+          <input id="simImageFilesInput" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple class="hidden" />
+          <button type="button" id="simPickImagesBtn" class="btn btn-secondary compact">📎 เลือกรูปเอง</button>
+          <button type="button" id="simGen2ProofsBtn" class="btn btn-voucher compact">📸 สร้างรูปหลักฐาน 2 รูป (ไลก์+แชร์)</button>
+          <button type="button" id="simClearImagesBtn" class="btn btn-secondary compact hidden">ล้างรูป</button>
+        </div>
+        <div id="simImagePreviewList" class="sim-thumb-strip"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-close-dialog="simulatorDialog">ยกเลิก</button>
+        <button type="submit" class="btn btn-primary">ยิง Webhook จำลอง</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Modal 2: Add New Channel -->
+  <dialog id="addChannelDialog" class="modal">
+    <form id="addChannelForm" method="dialog" class="modal-body">
+      <div class="modal-header">
+        <h3>เพิ่มร้านค้าใหม่ (LINE OA / Facebook Page)</h3>
+        <button type="button" class="icon-btn" data-close-dialog="addChannelDialog" aria-label="ปิด">&times;</button>
+      </div>
+      <label class="field-group">
+        <span>แพลตฟอร์ม</span>
+        <select id="newChPlatform" class="select-input" required>
+          <option value="line">LINE Official Account</option>
+          <option value="facebook">Facebook Page</option>
+        </select>
+      </label>
+      <label class="field-group">
+        <span>รหัสร้าน (เช่น a6 หรือ b6)</span>
+        <input id="newChCode" type="text" class="text-input" placeholder="a6" required />
+      </label>
+      <label class="field-group">
+        <span>ชื่อร้านที่แสดงในระบบ</span>
+        <input id="newChName" type="text" class="text-input" placeholder="ร้าน a6 (อุปกรณ์ไอที)" required />
+      </label>
+      <label class="field-group">
+        <span>LINE Channel ID หรือ Facebook Page ID</span>
+        <input id="newChExternalId" type="text" class="text-input mono" placeholder="2000000006" required />
+      </label>
+      <label class="field-group">
+        <span>Access Token (จะถูกเข้ารหัส AES-256-GCM ก่อนบันทึก)</span>
+        <input id="newChAccessToken" type="password" class="text-input mono" placeholder="ปล่อยว่างเพื่อใช้ mock token" />
+      </label>
+      <label class="field-group">
+        <span>LINE Channel Secret (เฉพาะ LINE)</span>
+        <input id="newChSecret" type="password" class="text-input mono" placeholder="ปล่อยว่างสำหรับ Facebook" />
+      </label>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-close-dialog="addChannelDialog">ยกเลิก</button>
+        <button type="submit" class="btn btn-primary">บันทึกร้านค้า</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Modal 3: Add / Edit Quick Reply (Global or Per-Shop) -->
+  <dialog id="addQuickReplyDialog" class="modal">
+    <form id="addQuickReplyForm" method="dialog" class="modal-body">
+      <div class="modal-header">
+        <h3 id="qrModalHeading">เพิ่มข้อความตอบด่วน (Quick Reply)</h3>
+        <button type="button" class="icon-btn" data-close-dialog="addQuickReplyDialog" aria-label="ปิด">&times;</button>
+      </div>
+      <label class="field-group">
+        <span>ขอบเขตการใช้งาน</span>
+        <select id="qrChannelSelect" class="select-input"></select>
+      </label>
+      <label class="field-group">
+        <span>คีย์ลัด (ขึ้นต้นด้วย / เช่น /size หรือ /bank_a1)</span>
+        <input id="qrShortcutInput" type="text" class="text-input mono" placeholder="/promo_a1" required />
+      </label>
+      <label class="field-group">
+        <span>ชื่อสั้นๆ</span>
+        <input id="qrTitleInput" type="text" class="text-input" placeholder="โปรโมชันพิเศษ" required />
+      </label>
+      <label class="field-group">
+        <span>ข้อความตอบกลับ</span>
+        <textarea id="qrContentInput" rows="3" class="text-input" placeholder="ข้อความที่จะแทรกเมื่อกดใช้ (วางรูปด้วย Ctrl+V ได้ด้วย)..."></textarea>
+      </label>
+      <div class="field-group">
+        <span>รูปภาพประกอบข้อความด่วน (ไม่บังคับ — เช่น QR พร้อมเพย์, ตารางไซซ์)</span>
+        <div class="qr-image-picker">
+          <input id="qrImageFileInput" type="file" accept="image/png,image/jpeg,image/webp,image/gif" class="hidden" />
+          <button type="button" id="qrAttachImageBtn" class="btn btn-secondary compact">📎 เลือกรูปภาพ</button>
+          <span id="qrImageStatus" class="qr-image-status">ยังไม่ได้แนบรูป</span>
+          <button type="button" id="qrRemoveImageBtn" class="btn btn-secondary compact hidden">× ลบรูป</button>
+        </div>
+      </div>
+      <div class="qr-live-preview-box">
+        <div class="qr-live-preview-label">พรีวิวข้อความด่วน (แยกรูปและข้อความเป็น 2 บอลลูนเหมือน LINE / FB จริง)</div>
+        <div class="qr-live-preview-stage">
+          <img id="qrModalPreviewImg" class="msg-image hidden" alt="พรีวิวรูปข้อความด่วน" />
+          <div id="qrModalPreviewText" class="msg-bubble qr-live-bubble qr-live-text">พิมพ์ข้อความด้านบนเพื่อดูพรีวิว...</div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-close-dialog="addQuickReplyDialog">ยกเลิก</button>
+        <button type="submit" id="qrSubmitBtn" class="btn btn-primary">บันทึกข้อความตอบด่วน</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Modal 3b: Manage Quick Replies (List / Edit / Delete) -->
+  <dialog id="manageQuickRepliesDialog" class="modal modal-wide">
+    <div class="modal-body">
+      <div class="modal-header">
+        <h3>จัดการข้อความตอบด่วน (แก้ไข / ลบ)</h3>
+        <button type="button" class="icon-btn" data-close-dialog="manageQuickRepliesDialog" aria-label="ปิด">&times;</button>
+      </div>
+      <div class="qr-manage-toolbar">
+        <select id="qrManageScopeSelect" class="select-input compact" aria-label="กรองข้อความตอบด่วน">
+          <option value="active">แสดง: ร้านนี้ + ใช้ทุกร้าน</option>
+          <option value="all">แสดงทั้งหมดทุกร้าน</option>
+        </select>
+        <button type="button" id="qrManageAddNewBtn" class="btn btn-primary compact">+ เพิ่มข้อความตอบด่วน</button>
+      </div>
+      <div id="qrManageList" class="qr-manage-list"></div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-close-dialog="manageQuickRepliesDialog">ปิดหน้าต่าง</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Modal 4: Image Lightbox -->
+  <dialog id="lightboxDialog" class="lightbox-modal">
+    <div class="lightbox-inner">
+      <button type="button" class="lightbox-close" data-close-dialog="lightboxDialog" aria-label="ปิดรูปภาพ">&times;</button>
+      <img id="lightboxImg" alt="รูปภาพขนาดเต็ม" />
+    </div>
+  </dialog>
+
+  <!-- Modal 5: Campaigns & Gift Voucher (.xls Import/Export) -->
+  <dialog id="campaignsDialog" class="modal modal-xl">
+    <div class="modal-body">
+      <div class="modal-header">
+        <h3>🎁 จัดการกิจกรรม &amp; คลังโค้ด Gift Voucher (.xls · 1 code / 1 time)</h3>
+        <button type="button" class="icon-btn" data-close-dialog="campaignsDialog" aria-label="ปิด">&times;</button>
+      </div>
+
+      <div class="camp-top-bar">
+        <select id="campManageSelect" class="select-input" aria-label="เลือกกิจกรรม"></select>
+        <button type="button" id="toggleNewCampBtn" class="btn btn-secondary compact">+ สร้างกิจกรรมใหม่</button>
+      </div>
+
+      <form id="newCampaignForm" class="new-camp-box hidden">
+        <div class="new-camp-grid">
+          <label class="field-group">
+            <span>ชื่อกิจกรรม</span>
+            <input id="newCampName" type="text" class="text-input" placeholder="กิจกรรมไลก์+แชร์ เดือนธันวาคม" required />
+          </label>
+          <label class="field-group">
+            <span>เกณฑ์ AI ขั้นต่ำ (%)</span>
+            <input id="newCampMinConf" type="number" min="50" max="100" value="90" class="text-input" required />
+          </label>
+        </div>
+        <label class="field-group">
+          <span>กติกาที่ให้ AI ตรวจ</span>
+          <input id="newCampRules" type="text" class="text-input" value="กดไลก์เพจ + แชร์โพสต์กิจกรรมโดยเปิดเป็นสาธารณะ (ไอคอนลูกโลก 🌐)" required />
+        </label>
+        <label class="field-group">
+          <span>ข้อความส่งโค้ดอัตโนมัติ (ใช้ {{code}} แทนรหัสโค้ด)</span>
+          <textarea id="newCampTemplate" rows="2" class="text-input" required>ยินดีด้วยครับ! หลักฐานครบถ้วน 🎁 รหัส Gift Voucher ของคุณคือ: {{code}} (ใช้ได้ 1 ครั้ง)</textarea>
+        </label>
+        <div style="display:flex;justify-content:flex-end;gap:8px;">
+          <button type="button" id="cancelNewCampBtn" class="btn btn-secondary compact">ยกเลิก</button>
+          <button type="submit" class="btn btn-primary compact">บันทึกกิจกรรมใหม่</button>
+        </div>
+      </form>
+
+      <div id="campStatsRow" class="camp-stats-row">
+        <div class="stat-box ok"><span>พร้อมแจก</span><strong id="statAvailable">0</strong></div>
+        <div class="stat-box used"><span>แจกแล้ว (1/1)</span><strong id="statClaimed">0</strong></div>
+        <div class="stat-box total"><span>โค้ดทั้งหมด</span><strong id="statTotal">0</strong></div>
+      </div>
+
+      <div class="xls-import-box">
+        <div class="xls-actions-row">
+          <input id="xlsFileInput" type="file" accept=".xls,.xlsx,.csv,.txt" class="hidden" />
+          <button type="button" id="uploadXlsBtn" class="btn btn-primary compact">📤 นำเข้าโค้ดจากไฟล์ .xls / .xlsx / .csv</button>
+          <a href="/api/campaigns/sample-vouchers.xls" download class="btn btn-secondary compact" style="text-decoration:none;">📥 โหลดไฟล์ .xls ตัวอย่าง</a>
+          <a id="exportXlsLink" href="#" class="btn btn-voucher compact" style="text-decoration:none;">📊 ส่งออกรายงาน .xls</a>
+        </div>
+        <div class="inline-form" style="margin-top:8px;">
+          <input id="pasteCodesInput" type="text" class="text-input compact mono" placeholder="หรือวางโค้ดคั่นด้วยลูกน้ำ เช่น GV-001, GV-002, GV-003" />
+          <button type="button" id="importPastedCodesBtn" class="btn btn-secondary compact">เพิ่มโค้ด</button>
+        </div>
+      </div>
+
+      <div class="voucher-table-wrap">
+        <table class="voucher-table">
+          <thead>
+            <tr>
+              <th>รหัสโค้ด</th>
+              <th>มูลค่า</th>
+              <th>สถานะ</th>
+              <th>ลูกค้าที่ได้รับ</th>
+              <th>คะแนน AI</th>
+              <th>ผู้อนุมัติ / เวลา</th>
+            </tr>
+          </thead>
+          <tbody id="voucherTableBody"></tbody>
+        </table>
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-close-dialog="campaignsDialog">ปิดหน้าต่าง</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Modal 6: Change Own Password -->
+  <dialog id="changePwDialog" class="modal">
+    <form id="changePwForm" method="dialog" class="modal-body">
+      <div class="modal-header">
+        <h3>🔑 เปลี่ยนรหัสผ่านของฉัน</h3>
+        <button type="button" class="icon-btn" data-close-dialog="changePwDialog" aria-label="ปิด">&times;</button>
+      </div>
+      <label class="field-group">
+        <span>รหัสผ่านปัจจุบัน</span>
+        <input id="curPwInput" type="password" class="text-input" required autocomplete="current-password" />
+      </label>
+      <label class="field-group">
+        <span>รหัสผ่านใหม่ (อย่างน้อย 6 ตัวอักษร)</span>
+        <input id="newPwInput" type="password" class="text-input" minlength="6" required autocomplete="new-password" />
+      </label>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-close-dialog="changePwDialog">ยกเลิก</button>
+        <button type="submit" class="btn btn-primary">บันทึกรหัสผ่านใหม่</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Modal 7: Team & Per-Shop RBAC Management (Supervisor / Admin Only) -->
+  <dialog id="agentsDialog" class="modal modal-xl">
+    <div class="modal-body">
+      <div class="modal-header">
+        <h3>👥 จัดการทีมแอดมิน &amp; สิทธิ์แยกร้านค้า (RBAC)</h3>
+        <button type="button" class="icon-btn" data-close-dialog="agentsDialog" aria-label="ปิด">&times;</button>
+      </div>
+
+      <div class="camp-top-bar">
+        <span style="font-size:12.5px;color:#64748b;">Supervisor / Admin เห็นทุกร้านอัตโนมัติ · Agent เห็นเฉพาะร้านที่ติ๊กเลือก</span>
+        <button type="button" id="openNewAgentFormBtn" class="btn btn-primary compact">+ เพิ่มแอดมินใหม่</button>
+      </div>
+
+      <form id="agentEditorForm" class="new-camp-box hidden">
+        <strong id="agentEditorTitle" style="font-size:13px;">เพิ่มบัญชีแอดมินใหม่</strong>
+        <div class="agent-form-grid">
+          <label class="field-group">
+            <span>ชื่อที่แสดง</span>
+            <input id="agNameInput" type="text" class="text-input" placeholder="แอดมินบอย" required />
+          </label>
+          <label class="field-group">
+            <span>อีเมลสำหรับ Login</span>
+            <input id="agEmailInput" type="email" class="text-input" placeholder="boy@shop.local" required />
+          </label>
+          <label class="field-group">
+            <span>รหัสผ่าน (<span id="agPwHint">อย่างน้อย 6 ตัว</span>)</span>
+            <input id="agPasswordInput" type="password" class="text-input" placeholder="••••••" />
+          </label>
+          <label class="field-group">
+            <span>บทบาท (Role)</span>
+            <select id="agRoleSelect" class="select-input">
+              <option value="agent">Agent (เห็นเฉพาะร้านที่กำหนด)</option>
+              <option value="supervisor">Supervisor (เห็นทุกร้าน + จัดการทีม)</option>
+              <option value="admin">Admin (สิทธิ์เต็ม)</option>
+            </select>
+          </label>
+        </div>
+
+        <div id="agShopsSection" class="field-group">
+          <span>ร้านค้าที่อนุญาตให้เห็นและตอบแชทได้:</span>
+          <div id="agShopCheckboxes" class="shop-checkbox-grid"></div>
+        </div>
+
+        <div style="display:flex;justify-content:flex-end;gap:8px;">
+          <button type="button" id="cancelAgentEditorBtn" class="btn btn-secondary compact">ยกเลิก</button>
+          <button type="submit" class="btn btn-primary compact">บันทึกข้อมูลแอดมิน</button>
+        </div>
+      </form>
+
+      <div id="agentsListContainer" class="qr-manage-list"></div>
+
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-close-dialog="agentsDialog">ปิดหน้าต่าง</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Modal 8: Manage Channels & Live Webhook/Tokens (Supervisor / Admin) -->
+  <dialog id="manageChannelsDialog" class="modal modal-xl">
+    <div class="modal-body">
+      <div class="modal-header">
+        <h3>⚙ ตั้งค่าร้านค้า &amp; คัดลอก Webhook URL (LINE / Facebook)</h3>
+        <button type="button" class="icon-btn" data-close-dialog="manageChannelsDialog" aria-label="ปิด">&times;</button>
+      </div>
+      <div id="liveEnvBanner" class="modal-desc"></div>
+
+      <form id="editChannelForm" class="new-camp-box hidden">
+        <strong id="editChannelHeading" style="font-size:13px;">แก้ไขตั้งค่าร้านค้า</strong>
+        <div class="agent-form-grid">
+          <label class="field-group">
+            <span>ชื่อร้านที่แสดง</span>
+            <input id="editChName" type="text" class="text-input" required />
+          </label>
+          <label class="field-group">
+            <span>LINE Channel ID / Facebook Page ID</span>
+            <input id="editChExternalId" type="text" class="text-input mono" required />
+          </label>
+          <label class="field-group">
+            <span>Access Token ใหม่ (ปล่อยว่างถ้าไม่เปลี่ยน)</span>
+            <input id="editChAccessToken" type="password" class="text-input mono" placeholder="วาง Channel/Page Access Token จริง..." />
+          </label>
+          <label id="editChSecretWrap" class="field-group">
+            <span>LINE Channel Secret ใหม่ (ปล่อยว่างถ้าไม่เปลี่ยน)</span>
+            <input id="editChSecret" type="password" class="text-input mono" placeholder="วาง LINE Channel Secret จริง..." />
+          </label>
+        </div>
+        <div style="display:flex;justify-content:flex-end;gap:8px;">
+          <button type="button" id="cancelEditChannelBtn" class="btn btn-secondary compact">ยกเลิก</button>
+          <button type="submit" class="btn btn-primary compact">บันทึกการตั้งค่า (เข้ารหัส AES-256)</button>
+        </div>
+      </form>
+
+      <div id="manageChannelsList" class="qr-manage-list"></div>
+
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-close-dialog="manageChannelsDialog">ปิดหน้าต่าง</button>
+      </div>
+    </div>
+  </dialog>
+
+  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

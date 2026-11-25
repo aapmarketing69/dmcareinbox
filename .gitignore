@@ -1,0 +1,12 @@
+# Secrets & local env (NEVER commit to Git!)
+.env
+.env.local
+.env.*.local
+
+# Local SQLite database & uploaded media
+data/
+
+# Dependencies & logs
+node_modules/
+npm-debug.log*
+.DS_Store
