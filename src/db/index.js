@@ -16,6 +16,7 @@ export async function createDatabase({ config, dbPath = null, pgPool = null } = 
       const Pool = pgModule.default?.Pool || pgModule.Pool;
       const disableSsl =
         String(config.databaseUrl).includes('sslmode=disable') ||
+        String(config.databaseUrl).includes('.railway.internal') ||
         String(config.databaseUrl).includes('localhost') ||
         String(config.databaseUrl).includes('127.0.0.1');
       pool = new Pool({
