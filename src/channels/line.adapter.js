@@ -30,7 +30,7 @@ export function parseLineWebhookEvents(payload) {
     } else if (messageType === 'image') {
       contentText = '[รูปภาพจากลูกค้า]';
     } else if (messageType === 'sticker') {
-      contentText = `[สติกเกอร์ #${msg.stickerId || ''}]`;
+      contentText = '[สติกเกอร์]';
     } else if (messageType === 'file') {
       contentText = `[ไฟล์แนบ: ${msg.fileName || 'document'}]`;
     } else {
@@ -41,6 +41,10 @@ export function parseLineWebhookEvents(payload) {
     // LINE replyToken expires quickly (~30-60s); treat as valid for 50s safely
     const replyToken = ev.replyToken || null;
     const replyExpiresAt = replyToken ? new Date(Date.now() + 50_000).toISOString() : null;
+    const stickerMediaUrl =
+      messageType === 'sticker' && msg.stickerId
+        ? `https://stickershop.line-scdn.net/stickershop/v1/sticker/${encodeURIComponent(msg.stickerId)}/android/sticker.png`
+        : null;
 
     normalized.push({
       platform: 'line',
@@ -49,7 +53,7 @@ export function parseLineWebhookEvents(payload) {
       platformMessageId: msg.id || `line_${timestampMs}_${Math.random().toString(36).slice(2, 7)}`,
       messageType,
       contentText,
-      mediaUrl: msg.contentProvider?.originalContentUrl || null,
+      mediaUrl: stickerMediaUrl || msg.contentProvider?.originalContentUrl || null,
       replyToken,
       replyExpiresAt,
       timestampIso: new Date(timestampMs).toISOString(),
@@ -124,6 +128,8 @@ export async function sendLineMessage({
   text,
   messageType = 'text',
   mediaUrl = null,
+  stickerPackageId = null,
+  stickerId = null,
   liveDeliveryEnabled,
   fetchImpl = fetch,
 }) {
@@ -148,14 +154,20 @@ export async function sendLineMessage({
     : 'https://api.line.me/v2/bot/message/push';
 
   const messages = [];
-  if (messageType === 'image' && mediaUrl) {
+  if (messageType === 'sticker' && stickerPackageId && stickerId) {
+    messages.push({
+      type: 'sticker',
+      packageId: String(stickerPackageId),
+      stickerId: String(stickerId),
+    });
+  } else if (messageType === 'image' && mediaUrl) {
     messages.push({
       type: 'image',
       originalContentUrl: mediaUrl,
       previewImageUrl: mediaUrl,
     });
   }
-  if (text) {
+  if (text && messageType !== 'sticker') {
     messages.push({ type: 'text', text });
   }
 
@@ -184,6 +196,8 @@ export async function sendLineMessage({
         text,
         messageType,
         mediaUrl,
+        stickerPackageId,
+        stickerId,
         liveDeliveryEnabled,
         fetchImpl,
       });

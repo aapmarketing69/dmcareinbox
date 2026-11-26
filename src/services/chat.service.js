@@ -10,6 +10,7 @@ import {
 import {
   downloadFacebookMedia,
   fetchFacebookUserProfile,
+  parseFacebookReadEvents,
   parseFacebookWebhookEvents,
   sendFacebookMessage,
   signFacebookPayload,
@@ -63,7 +64,7 @@ export function createChatService({ repo, sseHub, config, uploadService = null, 
 
     // 2. Download real inbound media (LINE Content API / Facebook expiring CDN URL) into uploads / R2
     let resolvedMediaUrl = event.mediaUrl || null;
-    if (isLiveRealToken && uploadService && event.messageType === 'image') {
+    if (isLiveRealToken && uploadService && (event.messageType === 'image' || (channel.platform === 'facebook' && event.messageType === 'sticker'))) {
       if (channel.platform === 'line' && (!resolvedMediaUrl || (!resolvedMediaUrl.startsWith('/uploads/') && !resolvedMediaUrl.startsWith('https://')))) {
         const storedUrl = await downloadLineMessageContent({
           accessToken,
@@ -112,12 +113,19 @@ export function createChatService({ repo, sseHub, config, uploadService = null, 
       createdAt: event.timestampIso,
     });
 
+    // When a customer replies back, any prior agent messages have clearly been seen/read
+    await repo.markAgentMessagesReadByCustomer?.({
+      conversationId: conversation.id,
+      upToIso: event.timestampIso,
+    });
+
+    const workspaceId = channel.workspace_id || 'ws_default';
     const payload = {
       message,
       conversation,
-      channels: await repo.listChannelsWithStats(),
+      channels: await repo.listChannelsWithStats(null, workspaceId),
     };
-    sseHub.broadcast('message:created', payload);
+    sseHub.broadcast('message:created', payload, { workspaceId });
 
     return { duplicate: false, message, conversation };
   }
@@ -175,6 +183,7 @@ export function createChatService({ repo, sseHub, config, uploadService = null, 
       }
 
       const events = parseFacebookWebhookEvents(parsedBody);
+      const readEvents = parseFacebookReadEvents(parsedBody);
       const results = [];
 
       for (const ev of events) {
@@ -191,19 +200,57 @@ export function createChatService({ repo, sseHub, config, uploadService = null, 
         results.push(await ingestNormalizedEvent(channel, ev));
       }
 
+      // Process Facebook real-time Read Receipts (message_reads -> read.watermark)
+      let readUpdates = 0;
+      for (const rv of readEvents) {
+        const channel = await repo.getChannelByExternalId('facebook', rv.externalChannelId);
+        if (!channel) continue;
+        const conv = await repo.findLatestConversationByCustomerExternalId?.(channel.id, rv.externalUserId);
+        if (!conv) continue;
+        const changed = await repo.markAgentMessagesReadByCustomer?.({
+          conversationId: conv.id,
+          upToIso: rv.watermarkIso,
+        });
+        if (changed > 0) {
+          readUpdates += changed;
+          sseHub.broadcast(
+            'messages:read',
+            { conversationId: conv.id, watermarkIso: rv.watermarkIso },
+            { workspaceId: channel.workspace_id || 'ws_default' }
+          );
+        }
+      }
+
       await repo.logWebhookEvent({
         platform: 'facebook',
         status: 'processed',
         payload: parsedBody,
       });
 
-      return { received: events.length, results };
+      return { received: events.length, readUpdates, results };
     },
 
-    async sendAgentReply({ conversationId, text = '', agentId = 'agent_1', messageType = 'text', mediaUrl = null }) {
-      const cleanText = String(text || '').trim();
-      const hasMedia = Boolean(mediaUrl);
-      if (!cleanText && !hasMedia) {
+    async sendAgentReply({
+      conversationId,
+      text = '',
+      agentId = 'agent_1',
+      messageType = 'text',
+      mediaUrl = null,
+      stickerPackageId = null,
+      stickerId = null,
+    }) {
+      const isLineOfficialSticker = messageType === 'sticker' && Boolean(stickerPackageId && stickerId);
+      const isCustomSticker = messageType === 'sticker' && !isLineOfficialSticker && Boolean(mediaUrl);
+      const isSticker = isLineOfficialSticker || isCustomSticker;
+      const cleanText = isSticker ? '' : String(text || '').trim();
+      const stickerImgUrl = isLineOfficialSticker
+        ? `https://stickershop.line-scdn.net/stickershop/v1/sticker/${encodeURIComponent(stickerId)}/android/sticker.png`
+        : isCustomSticker
+          ? mediaUrl
+          : null;
+      const effectiveMediaUrl = isSticker ? stickerImgUrl : mediaUrl;
+      const hasMedia = Boolean(effectiveMediaUrl);
+      if (!cleanText && !hasMedia && !isSticker) {
         const err = new Error('Message text or image is required');
         err.statusCode = 400;
         throw err;
@@ -219,7 +266,7 @@ export function createChatService({ repo, sseHub, config, uploadService = null, 
       const channel = await repo.getChannelById(conv.channel_id);
       const accessToken = decryptSecret(channel.access_token_enc, config.encryptionKey);
       const isLiveRealToken = Boolean(config.liveDeliveryEnabled && accessToken && !accessToken.startsWith('mock_'));
-      const outboundMediaUrl = resolveOutboundMediaUrl(mediaUrl, {
+      const outboundMediaUrl = resolveOutboundMediaUrl(effectiveMediaUrl, {
         publicBaseUrl: config.publicBaseUrl,
         isLiveRealToken,
       });
@@ -228,7 +275,60 @@ export function createChatService({ repo, sseHub, config, uploadService = null, 
       const savedMessages = [];
       let deliveryResult;
 
-      if (hasMedia && cleanText) {
+      if (isSticker) {
+        if (channel.platform === 'line' && isLineOfficialSticker) {
+          deliveryResult = await sendLineMessage({
+            accessToken,
+            externalUserId: conv.customer_external_id,
+            replyToken: conv.line_reply_token,
+            replyExpiresAt: conv.line_reply_expires_at,
+            messageType: 'sticker',
+            stickerPackageId,
+            stickerId,
+            liveDeliveryEnabled: config.liveDeliveryEnabled,
+            fetchImpl,
+          });
+        } else if (channel.platform === 'line') {
+          deliveryResult = await sendLineMessage({
+            accessToken,
+            externalUserId: conv.customer_external_id,
+            replyToken: conv.line_reply_token,
+            replyExpiresAt: conv.line_reply_expires_at,
+            text: '',
+            messageType: 'image',
+            mediaUrl: outboundMediaUrl,
+            liveDeliveryEnabled: config.liveDeliveryEnabled,
+            fetchImpl,
+          });
+        } else {
+          deliveryResult = await sendFacebookMessage({
+            accessToken,
+            recipientId: conv.customer_external_id,
+            text: '',
+            messageType: 'image',
+            mediaUrl: outboundMediaUrl,
+            lastCustomerMsgAt: conv.last_customer_msg_at,
+            liveDeliveryEnabled: config.liveDeliveryEnabled,
+            fetchImpl,
+          });
+        }
+
+        savedMessages.push(
+          await repo.insertMessage({
+            conversationId: conv.id,
+            channelId: channel.id,
+            platformMessageId: deliveryResult.platformMessageId,
+            senderType: 'agent',
+            senderAgentId: agentId,
+            messageType: 'sticker',
+            contentText: '',
+            mediaUrl: effectiveMediaUrl,
+            deliveryStatus: 'sent',
+            deliveryMethod: deliveryResult.deliveryMethod,
+            createdAt: new Date(baseMs).toISOString(),
+          })
+        );
+      } else if (hasMedia && cleanText) {
         // Real LINE & Facebook Messenger deliver image and text as 2 separate bubbles
         if (channel.platform === 'line') {
           // LINE supports multiple bubbles in 1 API call (saves Reply/Push quota)
@@ -370,9 +470,11 @@ export function createChatService({ repo, sseHub, config, uploadService = null, 
       }
 
       const lastMsg = savedMessages[savedMessages.length - 1];
-      const previewLabel = hasMedia
-        ? (cleanText ? `คุณ: [รูปภาพ] ${cleanText}` : 'คุณ: [ส่งรูปภาพ]')
-        : `คุณ: ${cleanText}`;
+      const previewLabel = isSticker
+        ? 'คุณ: [ส่งสติกเกอร์]'
+        : hasMedia
+          ? (cleanText ? `คุณ: [รูปภาพ] ${cleanText}` : 'คุณ: [ส่งรูปภาพ]')
+          : `คุณ: ${cleanText}`;
 
       const updatedConv = await repo.updateConversationAfterAgentReply({
         conversationId: conv.id,
@@ -381,12 +483,17 @@ export function createChatService({ repo, sseHub, config, uploadService = null, 
         clearReplyToken: Boolean(deliveryResult.usedReplyToken),
       });
 
-      sseHub.broadcast('message:created', {
-        message: lastMsg,
-        messages: savedMessages,
-        conversation: updatedConv,
-        channels: await repo.listChannelsWithStats(),
-      });
+      const workspaceId = channel.workspace_id || 'ws_default';
+      sseHub.broadcast(
+        'message:created',
+        {
+          message: lastMsg,
+          messages: savedMessages,
+          conversation: updatedConv,
+          channels: await repo.listChannelsWithStats(null, workspaceId),
+        },
+        { workspaceId }
+      );
 
       return { message: lastMsg, messages: savedMessages, conversation: updatedConv, delivery: deliveryResult };
     },

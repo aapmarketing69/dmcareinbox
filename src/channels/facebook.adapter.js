@@ -35,10 +35,15 @@ export function parseFacebookWebhookEvents(payload) {
 
       if (Array.isArray(msg.attachments) && msg.attachments.length > 0) {
         const firstAtt = msg.attachments[0];
-        messageType = firstAtt.type || 'file';
+        const isFbSticker = Boolean(firstAtt.payload?.sticker_id);
+        messageType = isFbSticker ? 'sticker' : (firstAtt.type || 'file');
         mediaUrl = firstAtt.payload?.url || null;
         if (!contentText) {
-          contentText = messageType === 'image' ? '[รูปภาพจากลูกค้า]' : `[ไฟล์แนบ: ${messageType}]`;
+          contentText = isFbSticker
+            ? '[สติกเกอร์]'
+            : messageType === 'image'
+              ? '[รูปภาพจากลูกค้า]'
+              : `[ไฟล์แนบ: ${messageType}]`;
         }
       }
 
@@ -59,6 +64,29 @@ export function parseFacebookWebhookEvents(payload) {
   }
 
   return normalized;
+}
+
+/**
+ * Extracts Facebook Messenger read receipt events (`message_reads` webhook: `ev.read.watermark`).
+ */
+export function parseFacebookReadEvents(payload) {
+  if (payload?.object !== 'page') return [];
+  const entries = Array.isArray(payload?.entry) ? payload.entry : [];
+  const reads = [];
+
+  for (const entry of entries) {
+    const pageId = String(entry.id || '');
+    const messagingList = Array.isArray(entry.messaging) ? entry.messaging : [];
+    for (const ev of messagingList) {
+      if (!ev.read?.watermark || !ev.sender?.id) continue;
+      reads.push({
+        externalChannelId: pageId,
+        externalUserId: String(ev.sender.id),
+        watermarkIso: new Date(Number(ev.read.watermark)).toISOString(),
+      });
+    }
+  }
+  return reads;
 }
 
 /**

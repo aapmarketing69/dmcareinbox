@@ -8,11 +8,30 @@ import { hashPassword } from '../services/auth.service.js';
 const SCHEMA_SQL = `
 PRAGMA foreign_keys = ON;
 
+CREATE TABLE IF NOT EXISTS workspaces (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  slug TEXT NOT NULL UNIQUE,
+  plan_code TEXT NOT NULL DEFAULT 'pro',
+  max_channels INTEGER NOT NULL DEFAULT 10,
+  max_agents INTEGER NOT NULL DEFAULT 10,
+  ai_enabled INTEGER NOT NULL DEFAULT 1,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  expires_at TEXT,
+  contact_notes TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS agents (
   id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL DEFAULT 'ws_default' REFERENCES workspaces(id) ON DELETE CASCADE,
   display_name TEXT NOT NULL,
   email TEXT NOT NULL UNIQUE,
   password_hash TEXT,
+  must_change_password INTEGER NOT NULL DEFAULT 0,
+  totp_enabled INTEGER NOT NULL DEFAULT 0,
+  totp_secret_encrypted TEXT,
+  totp_recovery_hashes TEXT NOT NULL DEFAULT '[]',
   role TEXT NOT NULL DEFAULT 'agent',
   avatar_color TEXT NOT NULL DEFAULT '#2563eb',
   is_active INTEGER NOT NULL DEFAULT 1,
@@ -27,6 +46,7 @@ CREATE TABLE IF NOT EXISTS agent_channel_permissions (
 
 CREATE TABLE IF NOT EXISTS channels (
   id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL DEFAULT 'ws_default' REFERENCES workspaces(id) ON DELETE CASCADE,
   shop_code TEXT NOT NULL,
   name TEXT NOT NULL,
   platform TEXT NOT NULL CHECK (platform IN ('line', 'facebook')),
@@ -92,11 +112,20 @@ CREATE INDEX IF NOT EXISTS idx_msg_conv ON messages(conversation_id, created_at 
 
 CREATE TABLE IF NOT EXISTS quick_replies (
   id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL DEFAULT 'ws_default' REFERENCES workspaces(id) ON DELETE CASCADE,
   channel_id TEXT REFERENCES channels(id) ON DELETE CASCADE,
   shortcut TEXT NOT NULL,
   title TEXT NOT NULL,
   content_text TEXT NOT NULL,
   media_url TEXT
+);
+
+CREATE TABLE IF NOT EXISTS custom_stickers (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL DEFAULT 'ws_default' REFERENCES workspaces(id) ON DELETE CASCADE,
+  label TEXT NOT NULL DEFAULT '',
+  media_url TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS webhook_events (
@@ -116,6 +145,7 @@ CREATE TABLE IF NOT EXISTS app_meta (
 
 CREATE TABLE IF NOT EXISTS campaigns (
   id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL DEFAULT 'ws_default' REFERENCES workspaces(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
   channel_id TEXT REFERENCES channels(id) ON DELETE SET NULL,
   required_rules TEXT NOT NULL,
@@ -188,6 +218,7 @@ export function initDb(customDbPath, customEncryptionKey, options = {}) {
     db.exec('PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;');
   }
   db.exec(SCHEMA_SQL);
+  ensureWorkspaceSchemaAndSeed(db);
   ensureAgentAuthColumns(db);
   ensureConversationReplyColumns(db);
   ensureQuickReplyChannelColumn(db);
@@ -197,10 +228,30 @@ export function initDb(customDbPath, customEncryptionKey, options = {}) {
     seedInitialData(db, encryptionKey, { isProduction, adminEmail, adminPassword, adminName });
   }
   seedDefaultAgentAuthIfMissing(db, { adminPassword });
+  ensureSuperAdminExists(db);
   seedShopQuickRepliesIfMissing(db);
   seedDefaultCampaignIfMissing(db);
 
   return db;
+}
+
+function ensureWorkspaceSchemaAndSeed(db) {
+  const wsCols = db.prepare('PRAGMA table_info(workspaces)').all().map((c) => c.name);
+  if (!wsCols.includes('contact_notes')) {
+    db.exec("ALTER TABLE workspaces ADD COLUMN contact_notes TEXT NOT NULL DEFAULT ''");
+  }
+
+  db.prepare(`
+    INSERT OR IGNORE INTO workspaces (id, name, slug, plan_code, max_channels, max_agents, ai_enabled, is_active, created_at)
+    VALUES ('ws_default', 'DmCare Main', 'dmcare-main', 'enterprise', 50, 50, 1, 1, ?)
+  `).run(new Date().toISOString());
+
+  for (const table of ['agents', 'channels', 'quick_replies', 'campaigns']) {
+    const cols = db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
+    if (!cols.includes('workspace_id')) {
+      db.exec(`ALTER TABLE ${table} ADD COLUMN workspace_id TEXT NOT NULL DEFAULT 'ws_default'`);
+    }
+  }
 }
 
 function ensureAgentAuthColumns(db) {
@@ -208,11 +259,35 @@ function ensureAgentAuthColumns(db) {
   if (!cols.includes('password_hash')) {
     db.exec('ALTER TABLE agents ADD COLUMN password_hash TEXT');
   }
+  if (!cols.includes('must_change_password')) {
+    db.exec('ALTER TABLE agents ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0');
+  }
   if (!cols.includes('is_active')) {
     db.exec('ALTER TABLE agents ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1');
   }
   if (!cols.includes('last_login_at')) {
     db.exec('ALTER TABLE agents ADD COLUMN last_login_at TEXT');
+  }
+  if (!cols.includes('totp_enabled')) {
+    db.exec('ALTER TABLE agents ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0');
+  }
+  if (!cols.includes('totp_secret_encrypted')) {
+    db.exec('ALTER TABLE agents ADD COLUMN totp_secret_encrypted TEXT');
+  }
+  if (!cols.includes('totp_recovery_hashes')) {
+    db.exec("ALTER TABLE agents ADD COLUMN totp_recovery_hashes TEXT NOT NULL DEFAULT '[]'");
+  }
+}
+
+function ensureSuperAdminExists(db) {
+  const hasSuper = db.prepare("SELECT COUNT(*) AS cnt FROM agents WHERE role = 'super_admin'").get();
+  if (Number(hasSuper?.cnt || 0) > 0) return;
+
+  const primary = db
+    .prepare("SELECT id FROM agents WHERE id = 'agent_1' OR role IN ('owner', 'admin', 'supervisor') ORDER BY (id = 'agent_1') DESC, id ASC LIMIT 1")
+    .get();
+  if (primary) {
+    db.prepare("UPDATE agents SET role = 'super_admin' WHERE id = ?").run(primary.id);
   }
 }
 
@@ -353,6 +428,12 @@ function ensureConversationReplyColumns(db) {
   if (!cols.includes('last_replied_at')) {
     db.exec('ALTER TABLE conversations ADD COLUMN last_replied_at TEXT');
   }
+  if (!cols.includes('last_read_by_agent_id')) {
+    db.exec('ALTER TABLE conversations ADD COLUMN last_read_by_agent_id TEXT');
+  }
+  if (!cols.includes('last_read_at')) {
+    db.exec('ALTER TABLE conversations ADD COLUMN last_read_at TEXT');
+  }
 
   // Backfill conversations whose latest message was already sent by an agent
   db.exec(`
@@ -373,12 +454,12 @@ function ensureConversationReplyColumns(db) {
 
 function seedInitialData(db, encryptionKey, { isProduction = false, adminEmail = 'may@shop.local', adminPassword = 'admin1234', adminName = 'แอดมินเมย์' } = {}) {
   const insertAgent = db.prepare(
-    'INSERT INTO agents (id, display_name, email, password_hash, role, avatar_color) VALUES (?, ?, ?, ?, ?, ?)'
+    'INSERT INTO agents (id, workspace_id, display_name, email, password_hash, role, avatar_color) VALUES (?, ?, ?, ?, ?, ?, ?)'
   );
-  insertAgent.run('agent_1', adminName, adminEmail.toLowerCase(), hashPassword(adminPassword), 'supervisor', '#2563eb');
+  insertAgent.run('agent_1', 'ws_default', adminName, adminEmail.toLowerCase(), hashPassword(adminPassword), 'super_admin', '#2563eb');
   if (!isProduction) {
-    insertAgent.run('agent_2', 'แอดมินต้น', 'ton@shop.local', hashPassword('agent1234'), 'agent', '#059669');
-    insertAgent.run('agent_3', 'แอดมินฟ้า', 'fah@shop.local', hashPassword('agent1234'), 'agent', '#7c3aed');
+    insertAgent.run('agent_2', 'ws_default', 'แอดมินต้น', 'ton@shop.local', hashPassword('agent1234'), 'agent', '#059669');
+    insertAgent.run('agent_3', 'ws_default', 'แอดมินฟ้า', 'fah@shop.local', hashPassword('agent1234'), 'agent', '#7c3aed');
   }
 
   const insertChannel = db.prepare(`

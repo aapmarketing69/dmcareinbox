@@ -31,10 +31,11 @@ function getSigningSecret(config) {
   return config.sessionSecret || `${config.encryptionKey}:session_signing_v1`;
 }
 
-export function createSessionToken(agent, config) {
+export function createSessionToken(agent, config, { activeWorkspaceId = null } = {}) {
   const payload = {
     sub: agent.id,
     role: agent.role,
+    ws: activeWorkspaceId || agent.workspace_id || 'ws_default',
     exp: Date.now() + SESSION_TTL_MS,
   };
   const encoded = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
@@ -43,6 +44,22 @@ export function createSessionToken(agent, config) {
     .update(encoded)
     .digest('base64url');
   return `${encoded}.${sig}`;
+}
+
+export function createSignedActionToken(payloadObj, config, { ttlMs = 5 * 60 * 1000 } = {}) {
+  const payload = { ...payloadObj, exp: Date.now() + ttlMs };
+  const encoded = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
+  const sig = crypto
+    .createHmac('sha256', getSigningSecret(config))
+    .update(encoded)
+    .digest('base64url');
+  return `${encoded}.${sig}`;
+}
+
+export function verifySignedActionToken(token, expectedKind, config) {
+  const payload = verifySessionToken(token, config);
+  if (!payload || payload.kind !== expectedKind) return null;
+  return payload;
 }
 
 export function verifySessionToken(token, config) {
@@ -97,6 +114,10 @@ export function buildClearSessionCookieHeader({ secure = false } = {}) {
   return [clearCurrent, clearLegacy];
 }
 
+export function isSuperAdminRole(role) {
+  return String(role || '').toLowerCase() === 'super_admin';
+}
+
 export function isManagerRole(role) {
-  return ['owner', 'admin', 'supervisor'].includes(String(role || '').toLowerCase());
+  return ['super_admin', 'owner', 'admin', 'supervisor'].includes(String(role || '').toLowerCase());
 }
